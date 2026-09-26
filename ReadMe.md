@@ -41,7 +41,7 @@ Two phases:
 
 ## Prerequisites
 
-- Java 21+
+- Java 25
 - Ollama running locally
 - Models pulled:
 
