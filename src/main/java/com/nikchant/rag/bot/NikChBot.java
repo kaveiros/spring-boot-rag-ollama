@@ -1,5 +1,6 @@
 package com.nikchant.rag.bot;
 
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -14,6 +15,9 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Class for communicating with telegram bot.
@@ -26,6 +30,7 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
     private final TelegramClient telegramClient;
     private final ChatClient chatClient;
     private final String token;
+    private final ExecutorService executor = Executors.newFixedThreadPool(3);
 
 
     public NikChBot(ChatClient.Builder builder, @Value("${telegram.bot.token}") String token) {
@@ -35,44 +40,57 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
     }
 
 
+    private String askModel(String question) {
+        String reply =  chatClient.prompt()
+                .user(question)
+                .call()
+                .content();
+        return (reply == null || reply.isBlank()) ? "I could not produce answer for that." : reply;
+    }
 
+
+    private void sendToTelegram(long chatId, String messageText) {
+        SendMessage message = SendMessage // Create a message object
+                .builder()
+                .chatId(chatId)
+                .text(messageText)
+                .build();
+        try {
+            telegramClient.execute(message); // Sending our message object to user
+        } catch (TelegramApiException e) {
+            logger.error("Could not communicate with telegram... Reason {}", e.getMessage());
+        }
+    }
+
+    private void handle(Update update) {
+        if (!update.hasMessage() || !update.getMessage().hasText()) {
+            return;
+        }
+            // Set variables
+            String messageText = update.getMessage().getText();
+            long chatId = update.getMessage().getChatId();
+            String modelAnswer = askModel(messageText);
+            sendToTelegram(chatId, modelAnswer);
+    }
 
     @Override
     public void consume(List<Update> updates) {
-        updates.forEach(update -> {
-            // We check if the update has a message and the message has text
-            if (update.hasMessage() && update.getMessage().hasText()) {
-                // Set variables
-                String message_text = update.getMessage().getText();
-
-                String messageText = chatClient.prompt()
-                        .user(message_text)
-                        .call()
-                        .content();
-                long chat_id = update.getMessage().getChatId();
-
-                if (messageText != null) {
-                    SendMessage message = SendMessage // Create a message object
-                            .builder()
-                            .chatId(chat_id)
-                            .text(messageText)
-                            .build();
-                    try {
-                        telegramClient.execute(message); // Sending our message object to user
-                    } catch (TelegramApiException e) {
-                        logger.error("Could not communicate with telegram... Reason {}", e.getMessage());
-                    }
-                }
-
-            }
-        });
-
-        }
+        updates.forEach(update -> executor.submit(() -> {handle(update);}));
+    }
 
 
     @Override
     public String getBotToken() {
         return token;
+    }
+
+
+    @PreDestroy
+    void shutdown() throws InterruptedException {
+        executor.shutdown();
+        if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+            executor.shutdownNow();
+        }
     }
 
     @Override
