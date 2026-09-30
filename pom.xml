@@ -53,15 +53,19 @@
             <artifactId>telegrambots-client</artifactId>
             <version>${telegrambots.version}</version>
         </dependency>
+		<dependency>
+    		<groupId>org.springframework.ai</groupId>
+    		<artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+		</dependency>
 
 <!--		<dependency>-->
 <!--			<groupId>org.springframework.ai</groupId>-->
 <!--			<artifactId>spring-ai-starter-vector-store-chroma</artifactId>-->
 <!--		</dependency>-->
-<!--		<dependency>-->
-<!--			<groupId>org.springframework.ai</groupId>-->
-<!--			<artifactId>spring-ai-tika-document-reader</artifactId>-->
-<!--		</dependency>-->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-tika-document-reader</artifactId>
+		</dependency>
 <!--		<dependency>-->
 <!--			<groupId>org.springframework.ai</groupId>-->
 <!--			<artifactId>spring-ai-vector-store-advisor</artifactId>-->

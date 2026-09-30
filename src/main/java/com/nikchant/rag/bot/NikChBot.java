@@ -7,6 +7,7 @@ import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
@@ -18,6 +19,8 @@ import org.telegram.telegrambots.meta.api.objects.File;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+
+import com.nikchant.rag.services.tika.TikaService;
 
 import java.io.FileWriter;
 import java.io.InputStream;
@@ -39,14 +42,16 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
     private final ChatClient chatClient;
     private final String token;
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
+    private final TikaService tikaService;
    // private final TelegramBot bot;
 
 
-    public NikChBot(ChatClient.Builder builder, @Value("${telegram.bot.token}") String token) {
+    public NikChBot(ChatClient.Builder builder, @Value("${telegram.bot.token}") String token, TikaService tikaService) {
         this.token = token;
         this.chatClient = builder.build();
         this.telegramClient = new OkHttpTelegramClient(getBotToken());
         //this.bot = new TelegramBot.Builder(getBotToken()).okHttpClient(this.telegramClient).build();
+        this.tikaService = tikaService;
     }
 
 
@@ -73,17 +78,17 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
     }
 
     private void handle(Update update) {
-        if ((!update.hasMessage() || !update.getMessage().hasText()) 
-        && (!update.getMessage().hasDocument() || !update.getMessage().hasCaption())) {
-            return;
-        }
-            // Set variables
+        if ((update.hasMessage() && update.getMessage().hasText())) {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
             if (messageText != null && !messageText.isEmpty()) {
                 String modelAnswer = askModel(messageText);
                 sendToTelegram(chatId, modelAnswer);
             }
+        }
+        
+            // Set variables
+
             if (update.getMessage().hasDocument()) {
                 logger.info(update.getMessage().getDocument().getFileName());
                 var fileId = update.getMessage().getDocument().getFileId();
@@ -92,17 +97,19 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
                     GetFile getFile = new GetFile(fileId);
                     File f = telegramClient.execute(getFile);
                     
-                    InputStream file = telegramClient.downloadFileAsStream(f);
+                   // InputStream file = telegramClient.downloadFileAsStream(f);
+
+                    List<Document> content = tikaService.readDocument(f.getFileUrl(getBotToken()));
               
 
-                    FileUtils.writeByteArrayToFile(new java.io.File(update.getMessage().getDocument().getFileName()), IOUtils.toByteArray(file));
-                    System.out.println("File written successfully");
+                   // FileUtils.writeByteArrayToFile(new java.io.File(update.getMessage().getDocument().getFileName()), IOUtils.toByteArray(file));
+                    System.out.println(content.toString());
                     
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-               
             }
+            
 
     }
 
