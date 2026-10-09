@@ -20,6 +20,7 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
+import com.nikchant.rag.services.pgvector.VectorService;
 import com.nikchant.rag.services.tika.TikaService;
 
 import java.io.FileWriter;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Class for communicating with telegram bot.
@@ -43,23 +45,32 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
     private final String token;
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
     private final TikaService tikaService;
+    private final VectorService vectorService;
    // private final TelegramBot bot;
 
 
-    public NikChBot(ChatClient.Builder builder, @Value("${telegram.bot.token}") String token, TikaService tikaService) {
+    public NikChBot(ChatClient.Builder builder, @Value("${telegram.bot.token}") String token, TikaService tikaService,
+            VectorService vectorService) {
         this.token = token;
         this.chatClient = builder.build();
         this.telegramClient = new OkHttpTelegramClient(getBotToken());
         //this.bot = new TelegramBot.Builder(getBotToken()).okHttpClient(this.telegramClient).build();
         this.tikaService = tikaService;
+        this.vectorService = vectorService;
     }
 
 
-    private String askModel(String question) {
-        String reply =  chatClient.prompt()
-                .user(question)
-                .call()
-                .content();
+    private String askModel(String question, long userId) {
+        // Find the stored chunks that are relevant to the question
+        String context = vectorService.search(question, 4, userId).stream()
+                .map(Document::getText)
+                .collect(Collectors.joining("\n---\n"));
+
+        var prompt = chatClient.prompt().user(question);
+        if (!context.isEmpty()) {
+            prompt = prompt.system("Answer using the following context when it is relevant:\n" + context);
+        }
+        String reply = prompt.call().content();
         return (reply == null || reply.isBlank()) ? "I could not produce answer for that." : reply;
     }
 
@@ -81,8 +92,10 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
         if ((update.hasMessage() && update.getMessage().hasText())) {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
+            long userId = update.getMessage().getChat().getId();
+            logger.info("USER ID FOR THIS CHAT IS {}", userId);
             if (messageText != null && !messageText.isEmpty()) {
-                String modelAnswer = askModel(messageText);
+                String modelAnswer = askModel(messageText, userId);
                 sendToTelegram(chatId, modelAnswer);
             }
         }
@@ -100,13 +113,15 @@ public class NikChBot implements SpringLongPollingBot, LongPollingUpdateConsumer
                    // InputStream file = telegramClient.downloadFileAsStream(f);
 
                     List<Document> content = tikaService.readDocument(f.getFileUrl(getBotToken()));
-              
+                    String fileName = update.getMessage().getDocument().getFileName();
+                    long userId = update.getMessage().getChat().getId();
+                    vectorService.addToStore(content, fileName, userId);
+                    sendToTelegram(update.getMessage().getChatId(), "Stored " + fileName);
 
                    // FileUtils.writeByteArrayToFile(new java.io.File(update.getMessage().getDocument().getFileName()), IOUtils.toByteArray(file));
-                    System.out.println(content.toString());
                     
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    logger.error(e.getMessage());
                 }
             }
             
